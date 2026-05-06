@@ -1,18 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import Tesseract from 'tesseract.js';
-// IMPORTACIONES DE FIREBASE (Asegúrate de que la ruta './firebase' sea la correcta)
+// IMPORTACIONES DE FIREBASE
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from './firebase'; 
 
 function App() {
   const [paginaActual, setPaginaActual] = useState('login');
   const [usuarioActual, setUsuarioActual] = useState(null);
-  
+
   // Jerarquía de roles
   const [esMaestro, setEsMaestro] = useState(false);
   const [esJefe, setEsJefe] = useState(false);
 
-  // Gestión de Cuentas
+  // Gestión de Cuentas (NUBE)
   const [usuarios, setUsuarios] = useState([]);
   const [usuariosPendientes, setUsuariosPendientes] = useState([]);
   const [usuarioExpandido, setUsuarioExpandido] = useState(null);
@@ -56,7 +56,7 @@ function App() {
   const [medidasManuales, setMedidasManuales] = useState({ todas: '', eje1: '', eje2: '', eje3: '', eje4: '' });
   const [medidasFicha, setMedidasFicha] = useState([]);
   const [procesandoOCR, setProcesandoOCR] = useState(false);
-  
+
   const estadoEjesInicial = [
     { id: 1, gemela: false, ruedas: { izq: '', der: '', izqExt: '', izqInt: '', derInt: '', derExt: '' } },
     { id: 2, gemela: false, ruedas: { izq: '', der: '', izqExt: '', izqInt: '', derInt: '', derExt: '' } },
@@ -66,7 +66,7 @@ function App() {
   const [ejesNeumaticos, setEjesNeumaticos] = useState(estadoEjesInicial);
 
   // ==========================================
-  // SOLUCIÓN AL ERROR: COMPRESIÓN DE IMÁGENES
+  // COMPRESIÓN DE IMÁGENES
   // ==========================================
   const compressImageBase64 = (file, maxWidth = 1024, quality = 0.6) => {
     return new Promise((resolve, reject) => {
@@ -80,7 +80,6 @@ function App() {
           let width = img.width;
           let height = img.height;
 
-          // Redimensionar si es más grande que maxWidth
           if (width > maxWidth) {
             height = Math.round((height * maxWidth) / width);
             width = maxWidth;
@@ -91,7 +90,6 @@ function App() {
           const ctx = canvas.getContext('2d');
           ctx.drawImage(img, 0, 0, width, height);
           
-          // Exportar como JPEG con calidad reducida para ahorrar muchísimo espacio
           resolve(canvas.toDataURL('image/jpeg', quality));
         };
         img.onerror = (error) => reject(error);
@@ -101,30 +99,42 @@ function App() {
   };
 
   useEffect(() => {
-    // 1. CARGAMOS USUARIOS DESDE LOCALSTORAGE
-    const u = JSON.parse(localStorage.getItem('usuariosITV') || '[]');
-    const p = JSON.parse(localStorage.getItem('pendientesITV') || '[]');
-    setUsuarios(u); setUsuariosPendientes(p);
+    // 1. ESCUCHAR USUARIOS EN LA NUBE EN TIEMPO REAL
+    const unsubUsuarios = onSnapshot(collection(db, 'usuarios'), (snapshot) => {
+      const allUsers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      
+      if (allUsers.length === 0) {
+        // Crear cuenta maestra inicial en la base de datos si está vacía
+        const maestro = { nombre: "Daniel Castillo García", estacion: "3902", inspector: "A22", email: "danielcasgar89@gmail.com", password: "Dc13708562gh", esMaestro: true, esJefe: false, activo: true, solicitaReset: false, fotoPerfil: null };
+        addDoc(collection(db, 'usuarios'), maestro);
+      } else {
+        setUsuarios(allUsers.filter(u => u.activo));
+        setUsuariosPendientes(allUsers.filter(u => !u.activo));
+        
+        // Actualizar datos del usuario logueado en tiempo real por si le cambian permisos
+        setUsuarioActual(prev => {
+          if (!prev) return null;
+          const userDb = allUsers.find(u => u.id === prev.id);
+          if (!userDb || !userDb.activo) {
+            setPaginaActual('login'); // Echa al usuario si lo borran o desactivan
+            return null;
+          }
+          setEsMaestro(userDb.esMaestro || false);
+          setEsJefe(userDb.esJefe || false);
+          return userDb;
+        });
+      }
+    }, (error) => {
+      console.error("Error al escuchar usuarios en Firebase:", error);
+    });
 
-    if (u.length === 0) {
-      const maestro = { 
-        id: 1, nombre: "Daniel Castillo García", estacion: "3902", inspector: "A22", 
-        email: "danielcasgar89@gmail.com", password: "Dc13708562gh", esMaestro: true, 
-        esJefe: false, activo: true, fotoPerfil: null
-      };
-      const inicial = [maestro];
-      setUsuarios(inicial);
-      localStorage.setItem('usuariosITV', JSON.stringify(inicial));
-    }
-
-    // 2. ESCUCHAMOS LOS VEHÍCULOS EN LA NUBE EN TIEMPO REAL CON ONSNAPSHOT
-    const unsubscribe = onSnapshot(collection(db, 'vehiculos'), (snapshot) => {
+    // 2. ESCUCHAR LOS VEHÍCULOS EN LA NUBE EN TIEMPO REAL
+    const unsubVehiculos = onSnapshot(collection(db, 'vehiculos'), (snapshot) => {
       const vehiculosData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
       setVehiculosGuardados(vehiculosData);
-      
       setVehiculoDetalle(prevDetalle => {
         if (!prevDetalle) return null;
         const actualizado = vehiculosData.find(v => v.id === prevDetalle.id);
@@ -134,7 +144,7 @@ function App() {
       console.error("Error al escuchar vehículos en Firebase:", error);
     });
 
-    return () => unsubscribe();
+    return () => { unsubUsuarios(); unsubVehiculos(); };
   }, []);
 
   useEffect(() => {
@@ -145,49 +155,48 @@ function App() {
       ));
     }
   }, [vehiculosGuardados, busqueda]);
-
   const hacerLogin = () => {
     const user = usuarios.find(u => u.email.toLowerCase() === loginInput.toLowerCase() && u.password === passwordLogin && u.activo);
     if (user) {
       setUsuarioActual(user); setEsMaestro(user.esMaestro || false); setEsJefe(user.esJefe || false);
       setPaginaActual('buscar'); setLoginInput(''); setPasswordLogin('');
-    } else alert("Credenciales incorrectas o cuenta inactiva.");
+    } else alert("Credenciales incorrectas o cuenta inactiva o pendiente de autorización.");
   };
 
-  const registrarUsuario = () => {
+  const registrarUsuario = async () => {
     if (!nombreRegistro || !estacionRegistro || !inspectorRegistro || !emailRegistro || !passwordRegistro) return alert("Completa todos los campos del registro.");
-    const nuevo = { id: Date.now(), nombre: nombreRegistro, estacion: estacionRegistro, inspector: inspectorRegistro, email: emailRegistro, password: passwordRegistro, esMaestro: false, esJefe: false, activo: false, solicitaReset: false, fotoPerfil: null };
-    const nuevosPendientes = [...usuariosPendientes, nuevo];
-    setUsuariosPendientes(nuevosPendientes);
-    localStorage.setItem('pendientesITV', JSON.stringify(nuevosPendientes));
-    alert("Solicitud enviada correctamente.");
-    setNombreRegistro(''); setEstacionRegistro(''); setInspectorRegistro(''); setEmailRegistro(''); setPasswordRegistro('');
+    const nuevo = { nombre: nombreRegistro, estacion: estacionRegistro, inspector: inspectorRegistro, email: emailRegistro, password: passwordRegistro, esMaestro: false, esJefe: false, activo: false, solicitaReset: false, fotoPerfil: null };
+    try {
+      await addDoc(collection(db, 'usuarios'), nuevo);
+      alert("Solicitud enviada correctamente. Espera a que un responsable autorice tu cuenta.");
+      setNombreRegistro(''); setEstacionRegistro(''); setInspectorRegistro(''); setEmailRegistro(''); setPasswordRegistro('');
+    } catch (error) {
+      alert("Error al conectar con la base de datos.");
+    }
   };
 
-  const solicitarResetContrasena = () => {
+  const solicitarResetContrasena = async () => {
     const email = prompt("Introduce tu correo electrónico para solicitar una nueva contraseña:");
     if (!email) return;
-    const nuevosUsuarios = usuarios.map(u => u.email.toLowerCase() === email.toLowerCase() ? { ...u, solicitaReset: true } : u);
-    setUsuarios(nuevosUsuarios);
-    localStorage.setItem('usuariosITV', JSON.stringify(nuevosUsuarios));
+    const userToReset = [...usuarios, ...usuariosPendientes].find(u => u.email.toLowerCase() === email.toLowerCase());
+    if (userToReset) {
+      await updateDoc(doc(db, 'usuarios', userToReset.id), { solicitaReset: true });
+    }
     alert("Si el correo existe, se notificará al responsable para restablecer tu contraseña.");
   };
 
-  const resetearPasswordResponsable = (id) => {
+  const resetearPasswordResponsable = async (id) => {
     if (!window.confirm("¿Restablecer la contraseña a 'Itv1234*' ?")) return;
-    const nuevosUsuarios = usuarios.map(u => u.id === id ? { ...u, password: 'Itv1234*', solicitaReset: false } : u);
-    setUsuarios(nuevosUsuarios);
-    localStorage.setItem('usuariosITV', JSON.stringify(nuevosUsuarios));
+    await updateDoc(doc(db, 'usuarios', id), { password: 'Itv1234*', solicitaReset: false });
     alert("Contraseña restablecida a: Itv1234*");
   };
 
-  const cambiarPasswordPropia = () => {
+  const cambiarPasswordPropia = async () => {
     if (!passAntigua || !nuevaPass1 || !nuevaPass2) return alert("Por favor, completa todos los campos.");
     if (passAntigua !== usuarioActual.password) return alert("La contraseña antigua no es correcta.");
     if (nuevaPass1 !== nuevaPass2) return alert("Las contraseñas nuevas no coinciden.");
-    const actualizados = usuarios.map(u => u.id === usuarioActual.id ? { ...u, password: nuevaPass1 } : u);
-    setUsuarios(actualizados); localStorage.setItem('usuariosITV', JSON.stringify(actualizados));
-    setUsuarioActual({ ...usuarioActual, password: nuevaPass1 });
+    
+    await updateDoc(doc(db, 'usuarios', usuarioActual.id), { password: nuevaPass1 });
     setMostrarCambioPass(false); setPassAntigua(''); setNuevaPass1(''); setNuevaPass2('');
     alert("Tu contraseña ha sido actualizada con éxito.");
   };
@@ -196,22 +205,17 @@ function App() {
     const file = e.target.files[0];
     if (!file) return;
     const base64 = await compressImageBase64(file, 400, 0.8); // Perfil más pequeño
-    const actualizados = usuarios.map(u => u.id === usuarioActual.id ? { ...u, fotoPerfil: base64 } : u);
-    setUsuarios(actualizados);
-    localStorage.setItem('usuariosITV', JSON.stringify(actualizados));
-    setUsuarioActual({ ...usuarioActual, fotoPerfil: base64 });
+    await updateDoc(doc(db, 'usuarios', usuarioActual.id), { fotoPerfil: base64 });
   };
 
-  const ascenderAJefe = (id) => {
+  const ascenderAJefe = async (id) => {
     if (!window.confirm("¿Hacer a este usuario Jefe de Estación?")) return;
-    const actualizados = usuarios.map(u => u.id === id ? { ...u, esJefe: true } : u);
-    setUsuarios(actualizados); localStorage.setItem('usuariosITV', JSON.stringify(actualizados));
+    await updateDoc(doc(db, 'usuarios', id), { esJefe: true });
   };
 
-  const quitarJefe = (id) => {
+  const quitarJefe = async (id) => {
     if (!window.confirm("¿Quitar el rango de Jefe de Estación?")) return;
-    const actualizados = usuarios.map(u => u.id === id ? { ...u, esJefe: false } : u);
-    setUsuarios(actualizados); localStorage.setItem('usuariosITV', JSON.stringify(actualizados));
+    await updateDoc(doc(db, 'usuarios', id), { esJefe: false });
   };
 
   // --- LÓGICA DE VEHÍCULOS Y COMPLETADOS ---
@@ -247,7 +251,7 @@ function App() {
     }
   };
 
-  // FIREBASE CRUD
+  // FIREBASE CRUD VEHICULOS
   const bloquearVehiculo = async (id, e) => {
     e.stopPropagation();
     if(!window.confirm("¿Marcar como revisado y bloquear edición para inspectores?")) return;
@@ -272,6 +276,7 @@ function App() {
     const file = e.target.files[0];
     if (!file) return;
     const base64 = await compressImageBase64(file, 1024, 0.6); // Comprimir para evitar error 1MB
+    
     if (isEdit) {
       setVehiculoDetalle(prev => ({...prev, fotos: { ...prev.fotos, [vista]: { ...prev.fotos[vista], url: base64 } }}));
     } else {
@@ -334,7 +339,8 @@ function App() {
       alert("¡El vehículo se ha guardado correctamente en la nube!");
       setNuevoVehiculo({ marca: '', modelo: '', anoInicio: '', anoFin: 'Actualidad', categoria: 'M/N' });
       setFotos({ frontal: { url: null, puntos: {} }, perfil: { url: null, puntos: {} } });
-      setModoMarcado(null); setDetallePopup({ descripcion: '', fotoDetalle: null });
+      setModoMarcado(null);
+      setDetallePopup({ descripcion: '', fotoDetalle: null });
       setPuntoActual({ vista: '', tipo: '', x: 0, y: 0, isEdit: false });
       const fileFrontal = document.getElementById('new-frontal'); if (fileFrontal) fileFrontal.value = '';
       const filePerfil = document.getElementById('new-perfil'); if (filePerfil) filePerfil.value = '';
@@ -364,7 +370,7 @@ function App() {
     const { id, ...dataSinId } = vehiculoActualizado; 
     try {
       await updateDoc(doc(db, 'vehiculos', id), dataSinId);
-      setEditandoVehiculo(false); 
+      setEditandoVehiculo(false);
       alert("Los cambios han sido guardados en la nube.");
     } catch (error) {
       console.error("Error al actualizar:", error);
@@ -385,8 +391,7 @@ function App() {
     const llanta = parseInt(match[3], 10);
     
     const D_Formula = (2 * ancho * (perfil / 100)) + (llanta * 25.4);
-    const D_ETRTO = D_Formula; 
-
+    const D_ETRTO = D_Formula;
     return { D_Formula, D_ETRTO, original: medidaTexto.toUpperCase() };
   };
 
@@ -411,7 +416,7 @@ function App() {
     
     const extraerDeTexto = (texto, ejesValidosAsignados) => {
       if(!texto) return;
-      const lineas = texto.split(/[\n,;]/); 
+      const lineas = texto.split(/[\n,;]/);
       lineas.forEach(linea => {
         const match = linea.match(/(\d{3})(?:\/(\d{2,3}))?\s*[A-Za-z\-]?\s*(\d{2,3})[C]?(?:\s*M\+S)?/gi);
         if (match) {
@@ -420,7 +425,7 @@ function App() {
             const calculos = parsearDiametros(m);
             if (calculos) {
               detectadas.push({
-                id: Date.now() + Math.random(),
+                 id: Date.now() + Math.random(),
                 original: m.toUpperCase().trim(),
                 ejes: ejesValidosAsignados,
                 isMS: isMS,
@@ -500,7 +505,6 @@ function App() {
       <svg viewBox="0 0 700 150" xmlns="http://www.w3.org/2000/svg" className="w-full max-w-[250px] mx-auto drop-shadow-xl">
         <circle cx="80" cy="50" r="18" fill="#34495e" fillOpacity="0.5"/>
         <circle cx="150" cy="100" r="22" fill="#34495e" fillOpacity="0.5"/>
-  
         <circle cx="280" cy="60" r="15" fill="#34495e" fillOpacity="0.5"/>
         <circle cx="70" cy="25" r="20" fill="#e67e22"/>
         <rect x="52.5" y="55" width="35" height="85" rx="17.5" fill="#2980b9"/>
@@ -508,7 +512,6 @@ function App() {
         <rect x="90" y="45" width="95" height="28" rx="14" fill="#2980b9"/>
         <rect x="200" y="40" width="35" height="100" rx="17.5" fill="#2980b9" transform="rotate(-15 217.5 90)"/>
         <rect x="240" y="30" width="35" height="100" rx="17.5" fill="#2980b9" transform="rotate(15 257.5 80)"/>
- 
         <text x="320" y="110" fontFamily="Arial, sans-serif" fontWeight="900" fontSize="44">
           <tspan fill="#e67e22">red</tspan> <tspan fill="#2980b9">itevelesa</tspan>
         </text>
@@ -530,8 +533,10 @@ function App() {
     let botones = ['bastidor', 'obd', 'bateria', 'r24db'];
     if (cat === 'L') botones = ['bastidor', 'bateria', 'r24db'];
     if (cat === 'O') botones = ['bastidor'];
+
     const act = { bastidor: 'bg-red-600 text-white', obd: 'bg-yellow-500 text-black', bateria: 'bg-blue-600 text-white', r24db: 'bg-green-600 text-white' };
     const inact = { bastidor: 'bg-red-900/20 text-red-500 border border-red-500/30', obd: 'bg-yellow-900/20 text-yellow-500 border border-yellow-500/30', bateria: 'bg-blue-900/20 text-blue-500 border border-blue-500/30', r24db: 'bg-green-900/20 text-green-500 border border-green-500/30' };
+
     return (
       <div className="flex flex-wrap gap-2 justify-center">
         {botones.map(t => (
@@ -566,7 +571,6 @@ function App() {
       </div>
     );
   };
-
   const renderContenido = () => {
     if (paginaActual === 'buscar') return (
       <div className="space-y-6">
@@ -609,12 +613,10 @@ function App() {
 
                   <div className="flex gap-2 flex-shrink-0 cursor-pointer" onClick={() => setVehiculoDetalle(v)}>
                     <div className="w-24 h-24 bg-black rounded-2xl overflow-hidden border border-gray-700 flex items-center justify-center">
-                        {v.fotos.frontal?.url ?
-                          <img src={v.fotos.frontal.url} className="w-full h-full object-contain" /> : <div className="text-[10px] text-gray-700 font-bold uppercase">Frontal</div>}
+                        {v.fotos.frontal?.url ? <img src={v.fotos.frontal.url} className="w-full h-full object-contain" /> : <div className="text-[10px] text-gray-700 font-bold uppercase">Frontal</div>}
                     </div>
                     <div className="w-24 h-24 bg-black rounded-2xl overflow-hidden border border-gray-700 flex items-center justify-center">
-                        {v.fotos.perfil?.url ?
-                          <img src={v.fotos.perfil.url} className="w-full h-full object-contain" /> : <div className="text-[10px] text-gray-700 font-bold uppercase">Perfil</div>}
+                        {v.fotos.perfil?.url ? <img src={v.fotos.perfil.url} className="w-full h-full object-contain" /> : <div className="text-[10px] text-gray-700 font-bold uppercase">Perfil</div>}
                     </div>
                   </div>
 
@@ -632,8 +634,7 @@ function App() {
                       {['bastidor', 'obd', 'bateria', 'r24db'].map(tipo => {
                         const vista = v.fotos?.frontal?.puntos?.[tipo] ? 'frontal' : v.fotos?.perfil?.puntos?.[tipo] ? 'perfil' : null;
                         if (!vista) return null;
-                        const colorClass = tipo === 'bastidor' ? 'border-red-500 text-red-500 bg-red-500/10' : tipo === 'obd' ? 
-                          'border-yellow-500 text-yellow-500 bg-yellow-500/10' : tipo === 'bateria' ? 'border-blue-500 text-blue-500 bg-blue-500/10' : 'border-green-500 text-green-500 bg-green-500/10';
+                        const colorClass = tipo === 'bastidor' ? 'border-red-500 text-red-500 bg-red-500/10' : tipo === 'obd' ? 'border-yellow-500 text-yellow-500 bg-yellow-500/10' : tipo === 'bateria' ? 'border-blue-500 text-blue-500 bg-blue-500/10' : 'border-green-500 text-green-500 bg-green-500/10';
                         return (
                           <button key={tipo} onClick={(e) => { e.stopPropagation(); verPuntoDirecto(v, vista, tipo); }} className={`text-[9px] font-black uppercase px-2 py-1 rounded border ${colorClass}`}>● {tipo === 'r24db' ? 'R-24' : tipo}</button>
                         );
@@ -649,7 +650,7 @@ function App() {
                       
                       {v.bloqueado && (
                         <span className="bg-green-600/10 text-green-500 border border-green-500/30 text-[9px] px-2 py-1.5 rounded-lg font-black uppercase tracking-widest inline-flex items-center gap-1.5 shadow-sm">
-                          <span className="text-[10px]">✔</span> Vehículo Verificado
+                         <span className="text-[10px]">✔</span> Vehículo Verificado
                         </span>
                       )}
 
@@ -674,7 +675,7 @@ function App() {
             </div>
           </>
         ) : (
-           <div className="bg-[#101c33] p-6 rounded-[2.5rem] border border-gray-800 shadow-2xl">
+            <div className="bg-[#101c33] p-6 rounded-[2.5rem] border border-gray-800 shadow-2xl">
             <button onClick={() => {setVehiculoDetalle(null); setEditandoVehiculo(false);}} className="mb-6 text-[#2980b9] font-black text-xs uppercase bg-[#2980b9]/10 border border-[#2980b9]/20 px-4 py-2 rounded-xl">← Volver al listado</button>
             {editandoVehiculo ? (
               <div className="space-y-6 animate-fadeIn">
@@ -745,6 +746,7 @@ function App() {
         )}
       </div>
     );
+
     if (paginaActual === 'añadir') return (
       <div className="space-y-6">
         <div className="bg-[#101c33] p-6 rounded-3xl border border-gray-800 shadow-xl">
@@ -841,7 +843,7 @@ function App() {
               {esMaestro ? "Cuentas Maestras ven todas las estaciones." : `Viendo solo cuentas de la Estación ${usuarioActual.estacion}.`}
             </p>
             <div className="space-y-3">
-              {[...usuarios, ...usuariosPendientes].filter(u => u.id !== 1 && (esMaestro || u.estacion === usuarioActual.estacion)).map(u => (
+              {[...usuarios, ...usuariosPendientes].filter(u => u.email !== "danielcasgar89@gmail.com" && (esMaestro || u.estacion === usuarioActual.estacion)).map(u => (
                 <div key={u.id} className="bg-[#101c33] rounded-3xl border border-gray-800 overflow-hidden shadow-lg">
                   <div className="p-5 flex justify-between items-center cursor-pointer" onClick={() => setUsuarioExpandido(usuarioExpandido === u.id ? null : u.id)}>
                     <div className="flex items-center gap-3">
@@ -859,9 +861,13 @@ function App() {
                     </div>
                     <div className="flex gap-2 relative z-20">
                       {!u.activo ? (
-                        <><button onClick={(e) => {e.stopPropagation(); const us = [...usuarios, {...u, activo: true}]; setUsuarios(us); setUsuariosPendientes(usuariosPendientes.filter(x=>x.id!==u.id)); localStorage.setItem('usuariosITV', JSON.stringify(us));}} className="bg-green-600 text-white p-3 rounded-xl shadow-lg shadow-green-900/40">✓</button>
-                        <button onClick={(e) => {e.stopPropagation(); setUsuariosPendientes(usuariosPendientes.filter(x=>x.id!==u.id));}} className="bg-red-600 text-white p-3 rounded-xl shadow-lg shadow-red-900/40">✕</button></>
-                      ) : <button onClick={(e) => {e.stopPropagation(); if(window.confirm("¿Borrar usuario?")){setUsuarios(usuarios.filter(x=>x.id!==u.id)); localStorage.setItem('usuariosITV', JSON.stringify(usuarios.filter(x=>x.id!==u.id)));}}} className="text-red-500 text-[10px] font-black uppercase px-3 border border-red-500/20 rounded-xl hover:bg-red-500/20 transition-colors">Borrar</button>}
+                        <>
+                          <button onClick={async (e) => { e.stopPropagation(); await updateDoc(doc(db, 'usuarios', u.id), { activo: true }); }} className="bg-green-600 text-white p-3 rounded-xl shadow-lg shadow-green-900/40">✓</button>
+                          <button onClick={async (e) => { e.stopPropagation(); await deleteDoc(doc(db, 'usuarios', u.id)); }} className="bg-red-600 text-white p-3 rounded-xl shadow-lg shadow-red-900/40">✕</button>
+                        </>
+                      ) : (
+                        <button onClick={async (e) => { e.stopPropagation(); if(window.confirm("¿Borrar usuario?")){ await deleteDoc(doc(db, 'usuarios', u.id)); } }} className="text-red-500 text-[10px] font-black uppercase px-3 border border-red-500/20 rounded-xl hover:bg-red-500/20 transition-colors">Borrar</button>
+                      )}
                     </div>
                   </div>
                   {usuarioExpandido === u.id && u.activo && (
@@ -921,7 +927,7 @@ function App() {
               <div className="flex items-center gap-2">
                 <span className="text-[9px] font-black uppercase text-gray-500 w-16">Eje 4:</span>
                 <input type="text" className="flex-1 bg-[#101c33] border border-gray-600 rounded-xl p-2.5 text-xs font-bold text-gray-300 outline-none uppercase" placeholder="Solo eje 4..." value={medidasManuales.eje4} onChange={(e) => actualizarMedidasManuales('eje4', e.target.value)} />
-              </div>
+               </div>
             </div>
           </div>
 
@@ -995,7 +1001,6 @@ function App() {
         </div>
       </div>
     );
-
     return null;
   };
 
@@ -1065,7 +1070,6 @@ function App() {
                        const v = vehiculoModal;
                        const vistaPunto = v.fotos?.frontal?.puntos?.[t] ? 'frontal' : v.fotos?.perfil?.puntos?.[t] ? 'perfil' : null;
                        if (!vistaPunto) return null;
-                       
                        const colorClass = t === 'bastidor' ? 'bg-red-600 text-white border-red-400 shadow-red-900/40' : t === 'obd' ? 'bg-yellow-500 text-black border-yellow-300 shadow-yellow-900/40' : t === 'bateria' ? 'bg-blue-600 text-white border-blue-400 shadow-blue-900/40' : 'bg-green-600 text-white border-green-400 shadow-green-900/40';
                        const isCurrent = puntoActual.tipo === t;
                        
