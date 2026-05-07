@@ -163,15 +163,32 @@ function App() {
     } else alert("Credenciales incorrectas o cuenta inactiva o pendiente de autorización.");
   };
 
-  const registrarUsuario = async () => {
-    if (!nombreRegistro || !estacionRegistro || !inspectorRegistro || !emailRegistro || !passwordRegistro) return alert("Completa todos los campos del registro.");
+  const registrarUsuario = async (e) => {
+    if (e) e.preventDefault(); // Evita que la página intente recargarse
+
+    if (!nombreRegistro || !estacionRegistro || !inspectorRegistro || !emailRegistro || !passwordRegistro) {
+      return alert("Completa todos los campos del registro.");
+    }
+
     const nuevo = { nombre: nombreRegistro, estacion: estacionRegistro, inspector: inspectorRegistro, email: emailRegistro, password: passwordRegistro, esMaestro: false, esJefe: false, activo: false, solicitaReset: false, fotoPerfil: null };
+
     try {
+      // 1. Te avisará justo antes de enviar
+      console.log("Intentando conectar con Firebase...", nuevo);
+      
+      // 2. Envía a la nube
       await addDoc(collection(db, 'usuarios'), nuevo);
+      
+      // 3. Si llega aquí, es que Firebase ha respondido bien
+      console.log("¡Éxito! Firebase ha guardado el usuario.");
       alert("Solicitud enviada correctamente. Espera a que un responsable autorice tu cuenta.");
+      
+      // Limpia las casillas
       setNombreRegistro(''); setEstacionRegistro(''); setInspectorRegistro(''); setEmailRegistro(''); setPasswordRegistro('');
     } catch (error) {
-      alert("Error al conectar con la base de datos.");
+      // Si Firebase rechaza la entrada, te dirá el porqué exacto
+      console.error("ERROR GRAVE DE FIREBASE:", error);
+      alert("Error al conectar: " + error.message);
     }
   };
 
