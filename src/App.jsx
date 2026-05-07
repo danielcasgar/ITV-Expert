@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import Tesseract from 'tesseract.js';
-// IMPORTACIONES DE FIREBASE
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from './firebase'; 
 
@@ -12,7 +11,7 @@ function App() {
   const [esMaestro, setEsMaestro] = useState(false);
   const [esJefe, setEsJefe] = useState(false);
 
-  // Gestión de Cuentas (NUBE)
+  // Gestión de Cuentas
   const [usuarios, setUsuarios] = useState([]);
   const [usuariosPendientes, setUsuariosPendientes] = useState([]);
   const [usuarioExpandido, setUsuarioExpandido] = useState(null);
@@ -66,7 +65,7 @@ function App() {
   const [ejesNeumaticos, setEjesNeumaticos] = useState(estadoEjesInicial);
 
   // ==========================================
-  // COMPRESIÓN DE IMÁGENES
+  // SOLUCIÓN AL ERROR: COMPRESIÓN DE IMÁGENES
   // ==========================================
   const compressImageBase64 = (file, maxWidth = 1024, quality = 0.6) => {
     return new Promise((resolve, reject) => {
@@ -99,24 +98,28 @@ function App() {
   };
 
   useEffect(() => {
-    // 1. ESCUCHAR USUARIOS EN LA NUBE EN TIEMPO REAL
+    // 1. ESCUCHAR USUARIOS EN FIREBASE EN TIEMPO REAL
     const unsubUsuarios = onSnapshot(collection(db, 'usuarios'), (snapshot) => {
       const allUsers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      
+
       if (allUsers.length === 0) {
-        // Crear cuenta maestra inicial en la base de datos si está vacía
-        const maestro = { nombre: "Daniel Castillo García", estacion: "3902", inspector: "A22", email: "danielcasgar89@gmail.com", password: "Dc13708562gh", esMaestro: true, esJefe: false, activo: true, solicitaReset: false, fotoPerfil: null };
+        // Crear la cuenta maestra en Firebase si la colección está vacía
+        const maestro = { 
+          nombre: "Daniel Castillo García", estacion: "3902", inspector: "A22", 
+          email: "danielcasgar89@gmail.com", password: "Dc13708562gh", esMaestro: true, 
+          esJefe: false, activo: true, fotoPerfil: null, solicitaReset: false
+        };
         addDoc(collection(db, 'usuarios'), maestro);
       } else {
         setUsuarios(allUsers.filter(u => u.activo));
         setUsuariosPendientes(allUsers.filter(u => !u.activo));
-        
-        // Actualizar datos del usuario logueado en tiempo real por si le cambian permisos
+
+        // Mantener actualizado al usuario actual si cambian sus permisos o lo borran
         setUsuarioActual(prev => {
           if (!prev) return null;
           const userDb = allUsers.find(u => u.id === prev.id);
           if (!userDb || !userDb.activo) {
-            setPaginaActual('login'); // Echa al usuario si lo borran o desactivan
+            setPaginaActual('login');
             return null;
           }
           setEsMaestro(userDb.esMaestro || false);
@@ -129,7 +132,7 @@ function App() {
     });
 
     // 2. ESCUCHAR LOS VEHÍCULOS EN LA NUBE EN TIEMPO REAL
-    const unsubVehiculos = onSnapshot(collection(db, 'vehiculos'), (snapshot) => {
+    const unsubscribeVehiculos = onSnapshot(collection(db, 'vehiculos'), (snapshot) => {
       const vehiculosData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
@@ -144,7 +147,7 @@ function App() {
       console.error("Error al escuchar vehículos en Firebase:", error);
     });
 
-    return () => { unsubUsuarios(); unsubVehiculos(); };
+    return () => { unsubUsuarios(); unsubscribeVehiculos(); };
   }, []);
 
   useEffect(() => {
@@ -156,37 +159,43 @@ function App() {
     }
   }, [vehiculosGuardados, busqueda]);
   const hacerLogin = () => {
-    const user = usuarios.find(u => u.email.toLowerCase() === loginInput.toLowerCase() && u.password === passwordLogin && u.activo);
+    const inputLimpio = loginInput.trim().toLowerCase();
+    const user = usuarios.find(u => u.email.toLowerCase() === inputLimpio && u.password === passwordLogin && u.activo);
     if (user) {
       setUsuarioActual(user); setEsMaestro(user.esMaestro || false); setEsJefe(user.esJefe || false);
       setPaginaActual('buscar'); setLoginInput(''); setPasswordLogin('');
-    } else alert("Credenciales incorrectas o cuenta inactiva o pendiente de autorización.");
+    } else {
+      alert("Credenciales incorrectas o cuenta inactiva o pendiente de autorización.");
+    }
   };
 
   const registrarUsuario = async (e) => {
     if (e) e.preventDefault(); // Evita que la página intente recargarse
-
+    
     if (!nombreRegistro || !estacionRegistro || !inspectorRegistro || !emailRegistro || !passwordRegistro) {
       return alert("Completa todos los campos del registro.");
     }
 
-    const nuevo = { nombre: nombreRegistro, estacion: estacionRegistro, inspector: inspectorRegistro, email: emailRegistro, password: passwordRegistro, esMaestro: false, esJefe: false, activo: false, solicitaReset: false, fotoPerfil: null };
+    const nuevo = { 
+      nombre: nombreRegistro.trim(), 
+      estacion: estacionRegistro.trim(), 
+      inspector: inspectorRegistro.trim(), 
+      email: emailRegistro.trim().toLowerCase(), 
+      password: passwordRegistro, 
+      esMaestro: false, 
+      esJefe: false, 
+      activo: false, 
+      solicitaReset: false, 
+      fotoPerfil: null 
+    };
 
     try {
-      // 1. Te avisará justo antes de enviar
       console.log("Intentando conectar con Firebase...", nuevo);
-      
-      // 2. Envía a la nube
       await addDoc(collection(db, 'usuarios'), nuevo);
-      
-      // 3. Si llega aquí, es que Firebase ha respondido bien
       console.log("¡Éxito! Firebase ha guardado el usuario.");
       alert("Solicitud enviada correctamente. Espera a que un responsable autorice tu cuenta.");
-      
-      // Limpia las casillas
       setNombreRegistro(''); setEstacionRegistro(''); setInspectorRegistro(''); setEmailRegistro(''); setPasswordRegistro('');
     } catch (error) {
-      // Si Firebase rechaza la entrada, te dirá el porqué exacto
       console.error("ERROR GRAVE DE FIREBASE:", error);
       alert("Error al conectar: " + error.message);
     }
@@ -195,7 +204,7 @@ function App() {
   const solicitarResetContrasena = async () => {
     const email = prompt("Introduce tu correo electrónico para solicitar una nueva contraseña:");
     if (!email) return;
-    const userToReset = [...usuarios, ...usuariosPendientes].find(u => u.email.toLowerCase() === email.toLowerCase());
+    const userToReset = [...usuarios, ...usuariosPendientes].find(u => u.email.toLowerCase() === email.trim().toLowerCase());
     if (userToReset) {
       await updateDoc(doc(db, 'usuarios', userToReset.id), { solicitaReset: true });
     }
@@ -221,7 +230,7 @@ function App() {
   const cambiarFotoPerfil = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const base64 = await compressImageBase64(file, 400, 0.8); // Perfil más pequeño
+    const base64 = await compressImageBase64(file, 400, 0.8);
     await updateDoc(doc(db, 'usuarios', usuarioActual.id), { fotoPerfil: base64 });
   };
 
@@ -268,7 +277,7 @@ function App() {
     }
   };
 
-  // FIREBASE CRUD VEHICULOS
+  // FIREBASE CRUD
   const bloquearVehiculo = async (id, e) => {
     e.stopPropagation();
     if(!window.confirm("¿Marcar como revisado y bloquear edición para inspectores?")) return;
@@ -292,8 +301,7 @@ function App() {
   const handleFotoVehiculo = async (vista, e, isEdit = false) => {
     const file = e.target.files[0];
     if (!file) return;
-    const base64 = await compressImageBase64(file, 1024, 0.6); // Comprimir para evitar error 1MB
-    
+    const base64 = await compressImageBase64(file, 1024, 0.6);
     if (isEdit) {
       setVehiculoDetalle(prev => ({...prev, fotos: { ...prev.fotos, [vista]: { ...prev.fotos[vista], url: base64 } }}));
     } else {
@@ -442,7 +450,7 @@ function App() {
             const calculos = parsearDiametros(m);
             if (calculos) {
               detectadas.push({
-                 id: Date.now() + Math.random(),
+                id: Date.now() + Math.random(),
                 original: m.toUpperCase().trim(),
                 ejes: ejesValidosAsignados,
                 isMS: isMS,
@@ -511,7 +519,6 @@ function App() {
     const porcentajeTxt = menorPorcentajeFallo !== Infinity ? menorPorcentajeFallo.toFixed(2) + "%" : "";
     return { apto: false, msg: `Supera ±3% (${porcentajeTxt})` };
   };
-
   // --- COMPONENTES VISUALES ---
   const LogoItevelesa = () => (
     <div className="flex flex-col items-center mb-4">
@@ -588,6 +595,7 @@ function App() {
       </div>
     );
   };
+
   const renderContenido = () => {
     if (paginaActual === 'buscar') return (
       <div className="space-y-6">
