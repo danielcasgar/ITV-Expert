@@ -6,6 +6,7 @@ import { db } from './firebase';
 function App() {
   const [paginaActual, setPaginaActual] = useState('login');
   const [usuarioActual, setUsuarioActual] = useState(null);
+  const [firebaseConectado, setFirebaseConectado] = useState(false); // NUEVO: Evita el fallo de login doble
 
   // Jerarquía de roles
   const [esMaestro, setEsMaestro] = useState(false);
@@ -67,8 +68,7 @@ function App() {
   // ==========================================
   // SOLUCIÓN AL ERROR: COMPRESIÓN DE IMÁGENES
   // ==========================================
-  // CORRECCIÓN: Ajustado a 800px y 0.5 de calidad para asegurar que nunca supere el límite de Firestore y se sincronice siempre.
-  const compressImageBase64 = (file, maxWidth = 800, quality = 0.5) => {
+  const compressImageBase64 = (file, maxWidth = 1024, quality = 0.6) => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.readAsDataURL(file);
@@ -128,8 +128,10 @@ function App() {
           return userDb;
         });
       }
+      setFirebaseConectado(true); // AVISA A REACT DE QUE LA CONEXIÓN ES EXITOSA
     }, (error) => {
       console.error("Error al escuchar usuarios en Firebase:", error);
+      alert("Error de permisos en Firebase. Revisa las reglas.");
     });
 
     // 2. ESCUCHAR LOS VEHÍCULOS EN LA NUBE EN TIEMPO REAL
@@ -159,13 +161,11 @@ function App() {
       ));
     }
   }, [vehiculosGuardados, busqueda]);
-
   const hacerLogin = () => {
-    // CORRECCIÓN: El .trim() fuerza a borrar espacios en blanco accidentales en correo y contraseña
-    const inputLimpio = loginInput.trim().toLowerCase();
-    const passLimpia = passwordLogin.trim();
+    if (!firebaseConectado) return alert("Aún conectando a la base de datos... Espera un segundo.");
     
-    const user = usuarios.find(u => u.email.trim().toLowerCase() === inputLimpio && u.password.trim() === passLimpia && u.activo);
+    const inputLimpio = loginInput.trim().toLowerCase();
+    const user = usuarios.find(u => u.email.toLowerCase() === inputLimpio && u.password === passwordLogin && u.activo);
     if (user) {
       setUsuarioActual(user); setEsMaestro(user.esMaestro || false); setEsJefe(user.esJefe || false);
       setPaginaActual('buscar'); setLoginInput(''); setPasswordLogin('');
@@ -175,32 +175,32 @@ function App() {
   };
 
   const registrarUsuario = async (e) => {
-    if (e && e.preventDefault) e.preventDefault(); 
+    if (e) e.preventDefault();
     
-    const nombre = nombreRegistro.trim();
-    const estacion = estacionRegistro.trim();
-    const inspector = inspectorRegistro.trim();
-    const email = emailRegistro.trim().toLowerCase();
-    const pass = passwordRegistro.trim();
-
-    if (!nombre || !estacion || !inspector || !email || !pass) {
+    if (!nombreRegistro || !estacionRegistro || !inspectorRegistro || !emailRegistro || !passwordRegistro) {
       return alert("Completa todos los campos del registro.");
     }
 
     const nuevo = { 
-      nombre, estacion, inspector, email, password: pass, 
-      esMaestro: false, esJefe: false, activo: false, solicitaReset: false, fotoPerfil: null 
+      nombre: nombreRegistro.trim(), 
+      estacion: estacionRegistro.trim(), 
+      inspector: inspectorRegistro.trim(), 
+      email: emailRegistro.trim().toLowerCase(), 
+      password: passwordRegistro, 
+      esMaestro: false, 
+      esJefe: false, 
+      activo: false, 
+      solicitaReset: false, 
+      fotoPerfil: null 
     };
 
     try {
-      // CORRECCIÓN: Limpiar ventanas INMEDIATAMENTE para evitar que parezca que se queda colgado
-      setNombreRegistro(''); setEstacionRegistro(''); setInspectorRegistro(''); setEmailRegistro(''); setPasswordRegistro('');
-      
       await addDoc(collection(db, 'usuarios'), nuevo);
-      alert("✅ Solicitud enviada correctamente a la nube. Espera a que un responsable autorice tu cuenta.");
+      alert("Solicitud enviada correctamente a la nube. Espera a que un responsable autorice tu cuenta.");
+      setNombreRegistro(''); setEstacionRegistro(''); setInspectorRegistro(''); setEmailRegistro(''); setPasswordRegistro('');
     } catch (error) {
       console.error("ERROR GRAVE DE FIREBASE:", error);
-      alert("Error al conectar: " + error.message);
+      alert("Error crítico al subir a Firebase. Código: " + error.code + " / " + error.message);
     }
   };
 
@@ -222,10 +222,10 @@ function App() {
 
   const cambiarPasswordPropia = async () => {
     if (!passAntigua || !nuevaPass1 || !nuevaPass2) return alert("Por favor, completa todos los campos.");
-    if (passAntigua.trim() !== usuarioActual.password) return alert("La contraseña antigua no es correcta.");
+    if (passAntigua !== usuarioActual.password) return alert("La contraseña antigua no es correcta.");
     if (nuevaPass1 !== nuevaPass2) return alert("Las contraseñas nuevas no coinciden.");
     
-    await updateDoc(doc(db, 'usuarios', usuarioActual.id), { password: nuevaPass1.trim() });
+    await updateDoc(doc(db, 'usuarios', usuarioActual.id), { password: nuevaPass1 });
     setMostrarCambioPass(false); setPassAntigua(''); setNuevaPass1(''); setNuevaPass2('');
     alert("Tu contraseña ha sido actualizada con éxito.");
   };
@@ -300,6 +300,7 @@ function App() {
       console.error("Error al desbloquear:", error);
     }
   };
+
   const handleFotoVehiculo = async (vista, e, isEdit = false) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -361,10 +362,9 @@ function App() {
         nombre: usuarioActual?.nombre || "" 
       }
     };
-
     try {
-      // CORRECCIÓN: Forzamos la limpieza de la pantalla inmediatamente antes de que acabe de guardar, 
-      // así el usuario recibe feedback visual instantáneo.
+      await addDoc(collection(db, 'vehiculos'), vehiculoFinal);
+      alert("¡El vehículo se ha guardado correctamente en la nube!");
       setNuevoVehiculo({ marca: '', modelo: '', anoInicio: '', anoFin: 'Actualidad', categoria: 'M/N' });
       setFotos({ frontal: { url: null, puntos: {} }, perfil: { url: null, puntos: {} } });
       setModoMarcado(null);
@@ -372,12 +372,9 @@ function App() {
       setPuntoActual({ vista: '', tipo: '', x: 0, y: 0, isEdit: false });
       const fileFrontal = document.getElementById('new-frontal'); if (fileFrontal) fileFrontal.value = '';
       const filePerfil = document.getElementById('new-perfil'); if (filePerfil) filePerfil.value = '';
-
-      await addDoc(collection(db, 'vehiculos'), vehiculoFinal);
-      alert("✅ ¡El vehículo se ha guardado correctamente en la nube!");
     } catch (error) {
       console.error("Error al guardar vehículo:", error);
-      alert("Hubo un problema al guardar el vehículo en la nube. Revisa si la foto sigue siendo muy grande. Error: " + error.message);
+      alert("Hubo un problema al guardar el vehículo en la nube. Código: " + error.code);
     }
   };
 
@@ -1049,7 +1046,10 @@ function App() {
             <div className="space-y-4">
               <input type="text" placeholder="CORREO ELECTRÓNICO" className="w-full bg-[#060c17] border border-gray-700 p-5 rounded-2xl font-bold text-sm focus:border-[#2980b9] outline-none text-white" value={loginInput} onChange={e => setLoginInput(e.target.value)} />
               <input type="password" placeholder="CONTRASEÑA" className="w-full bg-[#060c17] border border-gray-700 p-5 rounded-2xl font-bold text-sm focus:border-[#2980b9] outline-none text-white" value={passwordLogin} onChange={e => setPasswordLogin(e.target.value)} />
-              <button onClick={hacerLogin} className="w-full bg-[#2980b9] py-5 rounded-2xl font-black text-lg uppercase active:scale-95 transition-all shadow-xl shadow-blue-900/40 text-white">Acceder</button>
+              {/* NUEVO: El botón informa si Firebase aún está descargando datos */}
+              <button onClick={hacerLogin} disabled={!firebaseConectado} className={`w-full py-5 rounded-2xl font-black text-lg uppercase transition-all shadow-xl text-white ${firebaseConectado ? 'bg-[#2980b9] active:scale-95 shadow-blue-900/40' : 'bg-gray-600 cursor-not-allowed'}`}>
+                {firebaseConectado ? 'Acceder' : 'Conectando...'}
+              </button>
               <button onClick={solicitarResetContrasena} className="w-full text-gray-500 font-bold text-xs uppercase py-2 hover:text-gray-300 transition-colors">¿Olvidaste tu contraseña?</button>
             </div>
           </div>
