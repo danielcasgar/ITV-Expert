@@ -67,7 +67,8 @@ function App() {
   // ==========================================
   // SOLUCIÓN AL ERROR: COMPRESIÓN DE IMÁGENES
   // ==========================================
-  const compressImageBase64 = (file, maxWidth = 1024, quality = 0.6) => {
+  // CORRECCIÓN: Ajustado a 800px y 0.5 de calidad para asegurar que nunca supere el límite de Firestore y se sincronice siempre.
+  const compressImageBase64 = (file, maxWidth = 800, quality = 0.5) => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.readAsDataURL(file);
@@ -158,9 +159,13 @@ function App() {
       ));
     }
   }, [vehiculosGuardados, busqueda]);
+
   const hacerLogin = () => {
+    // CORRECCIÓN: El .trim() fuerza a borrar espacios en blanco accidentales en correo y contraseña
     const inputLimpio = loginInput.trim().toLowerCase();
-    const user = usuarios.find(u => u.email.toLowerCase() === inputLimpio && u.password === passwordLogin && u.activo);
+    const passLimpia = passwordLogin.trim();
+    
+    const user = usuarios.find(u => u.email.trim().toLowerCase() === inputLimpio && u.password.trim() === passLimpia && u.activo);
     if (user) {
       setUsuarioActual(user); setEsMaestro(user.esMaestro || false); setEsJefe(user.esJefe || false);
       setPaginaActual('buscar'); setLoginInput(''); setPasswordLogin('');
@@ -170,31 +175,29 @@ function App() {
   };
 
   const registrarUsuario = async (e) => {
-    if (e) e.preventDefault(); // Evita que la página intente recargarse
+    if (e && e.preventDefault) e.preventDefault(); 
     
-    if (!nombreRegistro || !estacionRegistro || !inspectorRegistro || !emailRegistro || !passwordRegistro) {
+    const nombre = nombreRegistro.trim();
+    const estacion = estacionRegistro.trim();
+    const inspector = inspectorRegistro.trim();
+    const email = emailRegistro.trim().toLowerCase();
+    const pass = passwordRegistro.trim();
+
+    if (!nombre || !estacion || !inspector || !email || !pass) {
       return alert("Completa todos los campos del registro.");
     }
 
     const nuevo = { 
-      nombre: nombreRegistro.trim(), 
-      estacion: estacionRegistro.trim(), 
-      inspector: inspectorRegistro.trim(), 
-      email: emailRegistro.trim().toLowerCase(), 
-      password: passwordRegistro, 
-      esMaestro: false, 
-      esJefe: false, 
-      activo: false, 
-      solicitaReset: false, 
-      fotoPerfil: null 
+      nombre, estacion, inspector, email, password: pass, 
+      esMaestro: false, esJefe: false, activo: false, solicitaReset: false, fotoPerfil: null 
     };
 
     try {
-      console.log("Intentando conectar con Firebase...", nuevo);
-      await addDoc(collection(db, 'usuarios'), nuevo);
-      console.log("¡Éxito! Firebase ha guardado el usuario.");
-      alert("Solicitud enviada correctamente. Espera a que un responsable autorice tu cuenta.");
+      // CORRECCIÓN: Limpiar ventanas INMEDIATAMENTE para evitar que parezca que se queda colgado
       setNombreRegistro(''); setEstacionRegistro(''); setInspectorRegistro(''); setEmailRegistro(''); setPasswordRegistro('');
+      
+      await addDoc(collection(db, 'usuarios'), nuevo);
+      alert("✅ Solicitud enviada correctamente a la nube. Espera a que un responsable autorice tu cuenta.");
     } catch (error) {
       console.error("ERROR GRAVE DE FIREBASE:", error);
       alert("Error al conectar: " + error.message);
@@ -219,10 +222,10 @@ function App() {
 
   const cambiarPasswordPropia = async () => {
     if (!passAntigua || !nuevaPass1 || !nuevaPass2) return alert("Por favor, completa todos los campos.");
-    if (passAntigua !== usuarioActual.password) return alert("La contraseña antigua no es correcta.");
+    if (passAntigua.trim() !== usuarioActual.password) return alert("La contraseña antigua no es correcta.");
     if (nuevaPass1 !== nuevaPass2) return alert("Las contraseñas nuevas no coinciden.");
     
-    await updateDoc(doc(db, 'usuarios', usuarioActual.id), { password: nuevaPass1 });
+    await updateDoc(doc(db, 'usuarios', usuarioActual.id), { password: nuevaPass1.trim() });
     setMostrarCambioPass(false); setPassAntigua(''); setNuevaPass1(''); setNuevaPass2('');
     alert("Tu contraseña ha sido actualizada con éxito.");
   };
@@ -297,7 +300,6 @@ function App() {
       console.error("Error al desbloquear:", error);
     }
   };
-
   const handleFotoVehiculo = async (vista, e, isEdit = false) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -359,9 +361,10 @@ function App() {
         nombre: usuarioActual?.nombre || "" 
       }
     };
+
     try {
-      await addDoc(collection(db, 'vehiculos'), vehiculoFinal);
-      alert("¡El vehículo se ha guardado correctamente en la nube!");
+      // CORRECCIÓN: Forzamos la limpieza de la pantalla inmediatamente antes de que acabe de guardar, 
+      // así el usuario recibe feedback visual instantáneo.
       setNuevoVehiculo({ marca: '', modelo: '', anoInicio: '', anoFin: 'Actualidad', categoria: 'M/N' });
       setFotos({ frontal: { url: null, puntos: {} }, perfil: { url: null, puntos: {} } });
       setModoMarcado(null);
@@ -369,6 +372,9 @@ function App() {
       setPuntoActual({ vista: '', tipo: '', x: 0, y: 0, isEdit: false });
       const fileFrontal = document.getElementById('new-frontal'); if (fileFrontal) fileFrontal.value = '';
       const filePerfil = document.getElementById('new-perfil'); if (filePerfil) filePerfil.value = '';
+
+      await addDoc(collection(db, 'vehiculos'), vehiculoFinal);
+      alert("✅ ¡El vehículo se ha guardado correctamente en la nube!");
     } catch (error) {
       console.error("Error al guardar vehículo:", error);
       alert("Hubo un problema al guardar el vehículo en la nube. Revisa si la foto sigue siendo muy grande. Error: " + error.message);
