@@ -6,7 +6,7 @@ import { db } from './firebase';
 function App() {
   const [paginaActual, setPaginaActual] = useState('login');
   const [usuarioActual, setUsuarioActual] = useState(null);
-  const [firebaseConectado, setFirebaseConectado] = useState(false); // NUEVO: Evita el fallo de login doble
+  const [firebaseConectado, setFirebaseConectado] = useState(false); 
 
   // Jerarquía de roles
   const [esMaestro, setEsMaestro] = useState(false);
@@ -65,10 +65,7 @@ function App() {
   ];
   const [ejesNeumaticos, setEjesNeumaticos] = useState(estadoEjesInicial);
 
-  // ==========================================
-  // SOLUCIÓN AL ERROR: COMPRESIÓN DE IMÁGENES
-  // ==========================================
-  const compressImageBase64 = (file, maxWidth = 1024, quality = 0.6) => {
+  const compressImageBase64 = (file, maxWidth = 800, quality = 0.5) => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.readAsDataURL(file);
@@ -99,12 +96,10 @@ function App() {
   };
 
   useEffect(() => {
-    // 1. ESCUCHAR USUARIOS EN FIREBASE EN TIEMPO REAL
     const unsubUsuarios = onSnapshot(collection(db, 'usuarios'), (snapshot) => {
       const allUsers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
       if (allUsers.length === 0) {
-        // Crear la cuenta maestra en Firebase si la colección está vacía
         const maestro = { 
           nombre: "Daniel Castillo García", estacion: "3902", inspector: "A22", 
           email: "danielcasgar89@gmail.com", password: "Dc13708562gh", esMaestro: true, 
@@ -115,7 +110,6 @@ function App() {
         setUsuarios(allUsers.filter(u => u.activo));
         setUsuariosPendientes(allUsers.filter(u => !u.activo));
 
-        // Mantener actualizado al usuario actual si cambian sus permisos o lo borran
         setUsuarioActual(prev => {
           if (!prev) return null;
           const userDb = allUsers.find(u => u.id === prev.id);
@@ -128,18 +122,25 @@ function App() {
           return userDb;
         });
       }
-      setFirebaseConectado(true); // AVISA A REACT DE QUE LA CONEXIÓN ES EXITOSA
+      setFirebaseConectado(true);
     }, (error) => {
       console.error("Error al escuchar usuarios en Firebase:", error);
-      alert("Error de permisos en Firebase. Revisa las reglas.");
+      alert("Error de conexión a Firebase. Revisa las comillas en tu archivo .env");
     });
 
-    // 2. ESCUCHAR LOS VEHÍCULOS EN LA NUBE EN TIEMPO REAL
     const unsubscribeVehiculos = onSnapshot(collection(db, 'vehiculos'), (snapshot) => {
       const vehiculosData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
+      
+      // CORRECCIÓN APLICADA: Ordenar usando el Año de Inicio (anoInicio) de más nuevo a más viejo
+      vehiculosData.sort((a, b) => {
+        const yearA = parseInt(a.anoInicio) || 0;
+        const yearB = parseInt(b.anoInicio) || 0;
+        return yearB - yearA;
+      });
+
       setVehiculosGuardados(vehiculosData);
       setVehiculoDetalle(prevDetalle => {
         if (!prevDetalle) return null;
@@ -165,7 +166,9 @@ function App() {
     if (!firebaseConectado) return alert("Aún conectando a la base de datos... Espera un segundo.");
     
     const inputLimpio = loginInput.trim().toLowerCase();
-    const user = usuarios.find(u => u.email.toLowerCase() === inputLimpio && u.password === passwordLogin && u.activo);
+    const passLimpia = passwordLogin.trim();
+    
+    const user = usuarios.find(u => u.email.trim().toLowerCase() === inputLimpio && u.password.trim() === passLimpia && u.activo);
     if (user) {
       setUsuarioActual(user); setEsMaestro(user.esMaestro || false); setEsJefe(user.esJefe || false);
       setPaginaActual('buscar'); setLoginInput(''); setPasswordLogin('');
@@ -175,29 +178,27 @@ function App() {
   };
 
   const registrarUsuario = async (e) => {
-    if (e) e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault(); 
     
-    if (!nombreRegistro || !estacionRegistro || !inspectorRegistro || !emailRegistro || !passwordRegistro) {
+    const nombre = nombreRegistro.trim();
+    const estacion = estacionRegistro.trim();
+    const inspector = inspectorRegistro.trim();
+    const email = emailRegistro.trim().toLowerCase();
+    const pass = passwordRegistro.trim();
+
+    if (!nombre || !estacion || !inspector || !email || !pass) {
       return alert("Completa todos los campos del registro.");
     }
 
     const nuevo = { 
-      nombre: nombreRegistro.trim(), 
-      estacion: estacionRegistro.trim(), 
-      inspector: inspectorRegistro.trim(), 
-      email: emailRegistro.trim().toLowerCase(), 
-      password: passwordRegistro, 
-      esMaestro: false, 
-      esJefe: false, 
-      activo: false, 
-      solicitaReset: false, 
-      fotoPerfil: null 
+      nombre, estacion, inspector, email, password: pass, 
+      esMaestro: false, esJefe: false, activo: false, solicitaReset: false, fotoPerfil: null 
     };
 
     try {
-      await addDoc(collection(db, 'usuarios'), nuevo);
-      alert("Solicitud enviada correctamente a la nube. Espera a que un responsable autorice tu cuenta.");
       setNombreRegistro(''); setEstacionRegistro(''); setInspectorRegistro(''); setEmailRegistro(''); setPasswordRegistro('');
+      await addDoc(collection(db, 'usuarios'), nuevo);
+      alert("✅ Solicitud enviada correctamente a la nube. Espera a que un responsable autorice tu cuenta.");
     } catch (error) {
       console.error("ERROR GRAVE DE FIREBASE:", error);
       alert("Error crítico al subir a Firebase. Código: " + error.code + " / " + error.message);
@@ -222,10 +223,10 @@ function App() {
 
   const cambiarPasswordPropia = async () => {
     if (!passAntigua || !nuevaPass1 || !nuevaPass2) return alert("Por favor, completa todos los campos.");
-    if (passAntigua !== usuarioActual.password) return alert("La contraseña antigua no es correcta.");
+    if (passAntigua.trim() !== usuarioActual.password) return alert("La contraseña antigua no es correcta.");
     if (nuevaPass1 !== nuevaPass2) return alert("Las contraseñas nuevas no coinciden.");
     
-    await updateDoc(doc(db, 'usuarios', usuarioActual.id), { password: nuevaPass1 });
+    await updateDoc(doc(db, 'usuarios', usuarioActual.id), { password: nuevaPass1.trim() });
     setMostrarCambioPass(false); setPassAntigua(''); setNuevaPass1(''); setNuevaPass2('');
     alert("Tu contraseña ha sido actualizada con éxito.");
   };
@@ -247,7 +248,6 @@ function App() {
     await updateDoc(doc(db, 'usuarios', id), { esJefe: false });
   };
 
-  // --- LÓGICA DE VEHÍCULOS Y COMPLETADOS ---
   const getPuntosMarcados = (v) => {
     const pts = [];
     if (v.fotos?.frontal?.puntos) Object.keys(v.fotos.frontal.puntos).forEach(k => pts.push(k));
@@ -280,7 +280,6 @@ function App() {
     }
   };
 
-  // FIREBASE CRUD
   const bloquearVehiculo = async (id, e) => {
     e.stopPropagation();
     if(!window.confirm("¿Marcar como revisado y bloquear edición para inspectores?")) return;
@@ -360,11 +359,11 @@ function App() {
         estacion: usuarioActual?.estacion || "", 
         inspector: usuarioActual?.inspector || "", 
         nombre: usuarioActual?.nombre || "" 
-      }
+      },
+      fechaGuardado: new Date().toISOString() 
     };
+
     try {
-      await addDoc(collection(db, 'vehiculos'), vehiculoFinal);
-      alert("¡El vehículo se ha guardado correctamente en la nube!");
       setNuevoVehiculo({ marca: '', modelo: '', anoInicio: '', anoFin: 'Actualidad', categoria: 'M/N' });
       setFotos({ frontal: { url: null, puntos: {} }, perfil: { url: null, puntos: {} } });
       setModoMarcado(null);
@@ -372,6 +371,9 @@ function App() {
       setPuntoActual({ vista: '', tipo: '', x: 0, y: 0, isEdit: false });
       const fileFrontal = document.getElementById('new-frontal'); if (fileFrontal) fileFrontal.value = '';
       const filePerfil = document.getElementById('new-perfil'); if (filePerfil) filePerfil.value = '';
+
+      await addDoc(collection(db, 'vehiculos'), vehiculoFinal);
+      alert("✅ ¡El vehículo se ha guardado correctamente en la nube!");
     } catch (error) {
       console.error("Error al guardar vehículo:", error);
       alert("Hubo un problema al guardar el vehículo en la nube. Código: " + error.code);
@@ -405,9 +407,6 @@ function App() {
       alert("Error al actualizar el vehículo. ¿Foto muy grande? Error: " + error.message);
     }
   };
-  // ==========================================
-  // LÓGICA ROBUSTA DE NEUMÁTICOS
-  // ==========================================
   const parsearDiametros = (medidaTexto) => {
     let limpia = medidaTexto.toUpperCase().replace(/C/g, '').trim();
     const regex = /(\d{3})(?:\/(\d{2,3}))?\s*[A-Z\-]?\s*(\d{2,3})/;
@@ -481,11 +480,37 @@ function App() {
     
     Tesseract.recognize(file, 'spa')
       .then(({ data: { text } }) => {
-        actualizarMedidasManuales('todas', medidasManuales.todas + (medidasManuales.todas ? '\n' : '') + text);
+        const textLimpio = text.toUpperCase().replace(/\s+/g, '');
+        const regexNeumaticos = /\d{3}\/\d{2}[A-Z]*\d{2}/g;
+        const medidasEncontradas = textLimpio.match(regexNeumaticos);
+
+        if (medidasEncontradas && medidasEncontradas.length > 0) {
+          const unicas = [...new Set(medidasEncontradas)]; 
+          alert(`✅ Escaneo Exitoso. Se han detectado ${unicas.length} medidas de neumáticos: ${unicas.join(', ')}`);
+
+          const nuevosEjes = [...ejesNeumaticos];
+          if (unicas[0]) {
+            nuevosEjes[0].ruedas.izq = unicas[0];
+            nuevosEjes[0].ruedas.der = unicas[0];
+          }
+          if (unicas[1]) {
+            nuevosEjes[1].ruedas.izq = unicas[1];
+            nuevosEjes[1].ruedas.der = unicas[1];
+          } else if (unicas[0]) {
+            nuevosEjes[1].ruedas.izq = unicas[0];
+            nuevosEjes[1].ruedas.der = unicas[0];
+          }
+          setEjesNeumaticos(nuevosEjes);
+
+          actualizarMedidasManuales('todas', medidasManuales.todas + (medidasManuales.todas ? '\n' : '') + unicas.join('\n'));
+        } else {
+          actualizarMedidasManuales('todas', medidasManuales.todas + (medidasManuales.todas ? '\n' : '') + text);
+          alert("No se ha podido detectar el patrón exacto. Se ha copiado todo el texto detectado en la casilla 'Todas' para revisión manual.");
+        }
         setProcesandoOCR(false);
       })
       .catch(err => {
-        alert("Error al leer la imagen. Asegúrate de que tenga buena iluminación.");
+        alert("Error al leer la imagen. Asegúrate de que tenga buena iluminación y no haya brillos.");
         setProcesandoOCR(false);
       });
   };
@@ -522,7 +547,7 @@ function App() {
     const porcentajeTxt = menorPorcentajeFallo !== Infinity ? menorPorcentajeFallo.toFixed(2) + "%" : "";
     return { apto: false, msg: `Supera ±3% (${porcentajeTxt})` };
   };
-  // --- COMPONENTES VISUALES ---
+
   const LogoItevelesa = () => (
     <div className="flex flex-col items-center mb-4">
       <h1 className="text-5xl font-black text-center italic uppercase tracking-tighter mb-2 text-gray-100 shadow-black drop-shadow-md">
@@ -929,9 +954,9 @@ function App() {
             <p className="text-[10px] text-gray-400 font-bold uppercase mb-3">1. Datos Ficha Técnica (Tarjeta ITV)</p>
             
             <div className="flex gap-2 mb-4">
-              <input type="file" id="ocr-upload" className="hidden" accept="image/*" onChange={ejecutarOCRGratuito} />
+              <input type="file" id="ocr-upload" className="hidden" accept="image/*" capture="environment" onChange={ejecutarOCRGratuito} />
               <label htmlFor="ocr-upload" className={`flex-1 bg-[#2980b9] text-center py-3 rounded-xl text-[10px] font-black cursor-pointer uppercase text-white shadow-lg shadow-blue-900/30 flex items-center justify-center gap-2 ${procesandoOCR ? 'opacity-50 pointer-events-none' : ''}`}>
-                {procesandoOCR ? '⏳ Escaneando...' : '📷 Escanear Tarjeta (Tesseract)'}
+                {procesandoOCR ? '⏳ Escaneando...' : '📷 Escanear Tarjeta Técnica'}
               </label>
             </div>
             
@@ -1046,7 +1071,6 @@ function App() {
             <div className="space-y-4">
               <input type="text" placeholder="CORREO ELECTRÓNICO" className="w-full bg-[#060c17] border border-gray-700 p-5 rounded-2xl font-bold text-sm focus:border-[#2980b9] outline-none text-white" value={loginInput} onChange={e => setLoginInput(e.target.value)} />
               <input type="password" placeholder="CONTRASEÑA" className="w-full bg-[#060c17] border border-gray-700 p-5 rounded-2xl font-bold text-sm focus:border-[#2980b9] outline-none text-white" value={passwordLogin} onChange={e => setPasswordLogin(e.target.value)} />
-              {/* NUEVO: El botón informa si Firebase aún está descargando datos */}
               <button onClick={hacerLogin} disabled={!firebaseConectado} className={`w-full py-5 rounded-2xl font-black text-lg uppercase transition-all shadow-xl text-white ${firebaseConectado ? 'bg-[#2980b9] active:scale-95 shadow-blue-900/40' : 'bg-gray-600 cursor-not-allowed'}`}>
                 {firebaseConectado ? 'Acceder' : 'Conectando...'}
               </button>
