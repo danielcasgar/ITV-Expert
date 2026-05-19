@@ -17,13 +17,12 @@ function App() {
   const [usuariosPendientes, setUsuariosPendientes] = useState([]);
   const [usuarioExpandido, setUsuarioExpandido] = useState(null);
 
-  // Login y registro
+  // Login y registro (Eliminado el correo)
   const [loginInput, setLoginInput] = useState('');
   const [passwordLogin, setPasswordLogin] = useState('');
   const [nombreRegistro, setNombreRegistro] = useState('');
   const [estacionRegistro, setEstacionRegistro] = useState('');
   const [inspectorRegistro, setInspectorRegistro] = useState('');
-  const [emailRegistro, setEmailRegistro] = useState('');
   const [passwordRegistro, setPasswordRegistro] = useState('');
 
   // Cambio de contraseña
@@ -100,9 +99,10 @@ function App() {
       const allUsers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
       if (allUsers.length === 0) {
+        // CORRECCIÓN: Cuenta maestra actualizada con tus datos exactos (Sin correo)
         const maestro = { 
           nombre: "Daniel Castillo García", estacion: "3902", inspector: "A22", 
-          email: "danielcasgar89@gmail.com", password: "Dc13708562gh", esMaestro: true, 
+          password: "Dc13708562gh", esMaestro: true, 
           esJefe: false, activo: true, fotoPerfil: null, solicitaReset: false
         };
         addDoc(collection(db, 'usuarios'), maestro);
@@ -134,7 +134,7 @@ function App() {
         ...doc.data()
       }));
       
-      // CORRECCIÓN APLICADA: Ordenar usando el Año de Inicio (anoInicio) de más nuevo a más viejo
+      // Ordenar usando el Año de Inicio (anoInicio) de más nuevo a más viejo
       vehiculosData.sort((a, b) => {
         const yearA = parseInt(a.anoInicio) || 0;
         const yearB = parseInt(b.anoInicio) || 0;
@@ -162,13 +162,14 @@ function App() {
       ));
     }
   }, [vehiculosGuardados, busqueda]);
-  const hacerLogin = () => {
+const hacerLogin = () => {
     if (!firebaseConectado) return alert("Aún conectando a la base de datos... Espera un segundo.");
     
     const inputLimpio = loginInput.trim().toLowerCase();
     const passLimpia = passwordLogin.trim();
     
-    const user = usuarios.find(u => u.email.trim().toLowerCase() === inputLimpio && u.password.trim() === passLimpia && u.activo);
+    // CORRECCIÓN: El login ahora busca EXCLUSIVAMENTE por el número de inspector
+    const user = usuarios.find(u => u.inspector.trim().toLowerCase() === inputLimpio && u.password.trim() === passLimpia && u.activo);
     if (user) {
       setUsuarioActual(user); setEsMaestro(user.esMaestro || false); setEsJefe(user.esJefe || false);
       setPaginaActual('buscar'); setLoginInput(''); setPasswordLogin('');
@@ -183,20 +184,24 @@ function App() {
     const nombre = nombreRegistro.trim();
     const estacion = estacionRegistro.trim();
     const inspector = inspectorRegistro.trim();
-    const email = emailRegistro.trim().toLowerCase();
     const pass = passwordRegistro.trim();
 
-    if (!nombre || !estacion || !inspector || !email || !pass) {
+    if (!nombre || !estacion || !inspector || !pass) {
       return alert("Completa todos los campos del registro.");
     }
 
+    // CORRECCIÓN: Validamos que haya escrito el nombre y al menos dos apellidos (mínimo 3 palabras)
+    if (nombre.split(' ').filter(Boolean).length < 3) {
+      return alert("Por favor, debes introducir tu nombre y tus dos apellidos para una correcta identificación.");
+    }
+
     const nuevo = { 
-      nombre, estacion, inspector, email, password: pass, 
+      nombre, estacion, inspector, password: pass, 
       esMaestro: false, esJefe: false, activo: false, solicitaReset: false, fotoPerfil: null 
     };
 
     try {
-      setNombreRegistro(''); setEstacionRegistro(''); setInspectorRegistro(''); setEmailRegistro(''); setPasswordRegistro('');
+      setNombreRegistro(''); setEstacionRegistro(''); setInspectorRegistro(''); setPasswordRegistro('');
       await addDoc(collection(db, 'usuarios'), nuevo);
       alert("✅ Solicitud enviada correctamente a la nube. Espera a que un responsable autorice tu cuenta.");
     } catch (error) {
@@ -206,13 +211,14 @@ function App() {
   };
 
   const solicitarResetContrasena = async () => {
-    const email = prompt("Introduce tu correo electrónico para solicitar una nueva contraseña:");
-    if (!email) return;
-    const userToReset = [...usuarios, ...usuariosPendientes].find(u => u.email.toLowerCase() === email.trim().toLowerCase());
+    // CORRECCIÓN: Pide el ID de inspector en lugar del correo
+    const inspectorID = prompt("Introduce tu Nº de Inspector para solicitar una nueva contraseña:");
+    if (!inspectorID) return;
+    const userToReset = [...usuarios, ...usuariosPendientes].find(u => u.inspector.toLowerCase() === inspectorID.trim().toLowerCase());
     if (userToReset) {
       await updateDoc(doc(db, 'usuarios', userToReset.id), { solicitaReset: true });
     }
-    alert("Si el correo existe, se notificará al responsable para restablecer tu contraseña.");
+    alert("Si el Nº de Inspector existe en el sistema, se notificará al responsable para restablecer tu contraseña.");
   };
 
   const resetearPasswordResponsable = async (id) => {
@@ -407,7 +413,7 @@ function App() {
       alert("Error al actualizar el vehículo. ¿Foto muy grande? Error: " + error.message);
     }
   };
-  const parsearDiametros = (medidaTexto) => {
+const parsearDiametros = (medidaTexto) => {
     let limpia = medidaTexto.toUpperCase().replace(/C/g, '').trim();
     const regex = /(\d{3})(?:\/(\d{2,3}))?\s*[A-Z\-]?\s*(\d{2,3})/;
     const match = limpia.match(regex);
@@ -626,7 +632,7 @@ function App() {
 
   const renderContenido = () => {
     if (paginaActual === 'buscar') return (
-      <div className="space-y-6">
+<div className="space-y-6">
         {!vehiculoDetalle ? (
           <>
             <div className="bg-[#101c33] p-6 rounded-3xl border border-gray-800 shadow-xl">
@@ -870,7 +876,7 @@ function App() {
           </div>
 
           <h2 className="text-2xl font-black uppercase italic">{usuarioActual.nombre}</h2>
-          <p className="text-[#2980b9] font-bold text-xs mb-2">{usuarioActual.email}</p>
+          <p className="text-[#2980b9] font-bold text-xs mb-2">Inspector: {usuarioActual.inspector}</p>
           <div className="mt-4">
             {!mostrarCambioPass ? (
               <button onClick={() => setMostrarCambioPass(true)} className="text-[10px] bg-gray-800 border border-gray-700 px-4 py-2 rounded-xl font-black uppercase text-gray-300">Cambiar Mi Contraseña</button>
@@ -896,7 +902,7 @@ function App() {
               {esMaestro ? "Cuentas Maestras ven todas las estaciones." : `Viendo solo cuentas de la Estación ${usuarioActual.estacion}.`}
             </p>
             <div className="space-y-3">
-              {[...usuarios, ...usuariosPendientes].filter(u => u.email !== "danielcasgar89@gmail.com" && (esMaestro || u.estacion === usuarioActual.estacion)).map(u => (
+              {[...usuarios, ...usuariosPendientes].filter(u => u.inspector !== "A22" && (esMaestro || u.estacion === usuarioActual.estacion)).map(u => (
                 <div key={u.id} className="bg-[#101c33] rounded-3xl border border-gray-800 overflow-hidden shadow-lg">
                   <div className="p-5 flex justify-between items-center cursor-pointer" onClick={() => setUsuarioExpandido(usuarioExpandido === u.id ? null : u.id)}>
                     <div className="flex items-center gap-3">
@@ -926,7 +932,6 @@ function App() {
                   {usuarioExpandido === u.id && u.activo && (
                     <div className="bg-[#060c17] p-5 border-t border-gray-800 text-xs space-y-3 relative z-10">
                       <p><span className="text-gray-500 font-black uppercase">Nombre:</span> <span className="font-bold text-white">{u.nombre}</span></p>
-                      <p><span className="text-gray-500 font-black uppercase">Correo:</span> <span className="font-bold text-[#2980b9]">{u.email}</span></p>
                       {esMaestro && (
                         <div className="mt-3 pt-3 border-t border-gray-800">
                           {u.esJefe ? <button onClick={() => quitarJefe(u.id)} className="w-full bg-purple-900/20 text-purple-400 border border-purple-500/30 py-3 rounded-xl font-black uppercase text-[10px]">Quitar rol de Jefe</button> : <button onClick={() => ascenderAJefe(u.id)} className="w-full bg-purple-600 text-white py-3 rounded-xl font-black uppercase text-[10px] shadow-lg">Ascender a Jefe</button>}
@@ -1069,7 +1074,8 @@ function App() {
             <div className="absolute top-0 left-0 w-full h-1 bg-[#e67e22] rounded-t-full"></div>
             <h2 className="text-2xl font-black text-center mb-8 italic uppercase text-gray-300 tracking-widest">Portal<br/><span className="text-sm text-[#2980b9]">Inspectores</span></h2>
             <div className="space-y-4">
-              <input type="text" placeholder="CORREO ELECTRÓNICO" className="w-full bg-[#060c17] border border-gray-700 p-5 rounded-2xl font-bold text-sm focus:border-[#2980b9] outline-none text-white" value={loginInput} onChange={e => setLoginInput(e.target.value)} />
+              {/* Cambiado el placeholder a Nº DE INSPECTOR */}
+              <input type="text" placeholder="Nº DE INSPECTOR" className="w-full bg-[#060c17] border border-gray-700 p-5 rounded-2xl font-bold text-sm focus:border-[#2980b9] outline-none text-white" value={loginInput} onChange={e => setLoginInput(e.target.value)} />
               <input type="password" placeholder="CONTRASEÑA" className="w-full bg-[#060c17] border border-gray-700 p-5 rounded-2xl font-bold text-sm focus:border-[#2980b9] outline-none text-white" value={passwordLogin} onChange={e => setPasswordLogin(e.target.value)} />
               <button onClick={hacerLogin} disabled={!firebaseConectado} className={`w-full py-5 rounded-2xl font-black text-lg uppercase transition-all shadow-xl text-white ${firebaseConectado ? 'bg-[#2980b9] active:scale-95 shadow-blue-900/40' : 'bg-gray-600 cursor-not-allowed'}`}>
                 {firebaseConectado ? 'Acceder' : 'Conectando...'}
@@ -1080,12 +1086,12 @@ function App() {
 
           <div className="bg-[#101c33] p-8 rounded-[3rem] border border-gray-800 w-full max-w-md shadow-[0_20px_50px_rgba(0,0,0,0.5)] mt-6">
                <p className="text-center text-[10px] font-black uppercase text-[#e67e22] mb-6 italic tracking-widest">Nuevo Registro</p>
-               <input type="text" placeholder="NOMBRE COMPLETO" className="w-full bg-[#060c17] border border-gray-700 p-4 rounded-2xl text-xs font-bold uppercase mb-3 focus:border-[#2980b9] outline-none text-white" value={nombreRegistro} onChange={e => setNombreRegistro(e.target.value)} />
+               <input type="text" placeholder="NOMBRE Y DOS APELLIDOS" className="w-full bg-[#060c17] border border-gray-700 p-4 rounded-2xl text-xs font-bold uppercase mb-3 focus:border-[#2980b9] outline-none text-white" value={nombreRegistro} onChange={e => setNombreRegistro(e.target.value)} />
                <div className="grid grid-cols-2 gap-3 mb-3">
                  <input type="number" placeholder="Nº ESTACIÓN" className="bg-[#060c17] border border-gray-700 p-4 rounded-2xl text-xs font-bold uppercase focus:border-[#2980b9] outline-none text-white" value={estacionRegistro} onChange={e => setEstacionRegistro(e.target.value)} />
                  <input type="text" placeholder="Nº INSPECTOR" className="bg-[#060c17] border border-gray-700 p-4 rounded-2xl text-xs font-bold uppercase focus:border-[#2980b9] outline-none text-white" value={inspectorRegistro} onChange={e => setInspectorRegistro(e.target.value)} />
                </div>
-               <input type="email" placeholder="CORREO ELECTRÓNICO" className="w-full bg-[#060c17] border border-gray-700 p-4 rounded-2xl text-xs font-bold uppercase mb-3 focus:border-[#2980b9] outline-none text-white" value={emailRegistro} onChange={e => setEmailRegistro(e.target.value)} />
+               {/* Eliminado el campo de email */}
                <input type="password" placeholder="CONTRASEÑA" className="w-full bg-[#060c17] border border-gray-700 p-4 rounded-2xl text-xs font-bold uppercase mb-5 focus:border-[#2980b9] outline-none text-white" value={passwordRegistro} onChange={e => setPasswordRegistro(e.target.value)} />
                <button onClick={registrarUsuario} className="w-full bg-gray-800 border border-gray-700 py-4 rounded-2xl font-black text-[10px] uppercase active:scale-95 hover:bg-gray-700 text-gray-300">Solicitar Acceso</button>
           </div>
