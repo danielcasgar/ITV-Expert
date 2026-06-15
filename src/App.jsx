@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import Tesseract from 'tesseract.js';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from './firebase'; 
 
@@ -17,7 +16,7 @@ function App() {
   const [usuariosPendientes, setUsuariosPendientes] = useState([]);
   const [usuarioExpandido, setUsuarioExpandido] = useState(null);
 
-  // Login y registro (Eliminado el correo)
+  // Login y registro
   const [loginInput, setLoginInput] = useState('');
   const [passwordLogin, setPasswordLogin] = useState('');
   const [nombreRegistro, setNombreRegistro] = useState('');
@@ -54,7 +53,6 @@ function App() {
   const [numEjesConfig, setNumEjesConfig] = useState(2);
   const [medidasManuales, setMedidasManuales] = useState({ todas: '', eje1: '', eje2: '', eje3: '', eje4: '' });
   const [medidasFicha, setMedidasFicha] = useState([]);
-  const [procesandoOCR, setProcesandoOCR] = useState(false);
 
   const estadoEjesInicial = [
     { id: 1, gemela: false, ruedas: { izq: '', der: '', izqExt: '', izqInt: '', derInt: '', derExt: '' } },
@@ -99,7 +97,6 @@ function App() {
       const allUsers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
       if (allUsers.length === 0) {
-        // CORRECCIÓN: Cuenta maestra actualizada con tus datos exactos (Sin correo)
         const maestro = { 
           nombre: "Daniel Castillo García", estacion: "3902", inspector: "A22", 
           password: "Dc13708562gh", esMaestro: true, 
@@ -134,7 +131,6 @@ function App() {
         ...doc.data()
       }));
       
-      // Ordenar usando el Año de Inicio (anoInicio) de más nuevo a más viejo
       vehiculosData.sort((a, b) => {
         const yearA = parseInt(a.anoInicio) || 0;
         const yearB = parseInt(b.anoInicio) || 0;
@@ -162,13 +158,12 @@ function App() {
       ));
     }
   }, [vehiculosGuardados, busqueda]);
-const hacerLogin = () => {
+  const hacerLogin = () => {
     if (!firebaseConectado) return alert("Aún conectando a la base de datos... Espera un segundo.");
     
     const inputLimpio = loginInput.trim().toLowerCase();
     const passLimpia = passwordLogin.trim();
     
-    // CORRECCIÓN: El login ahora busca EXCLUSIVAMENTE por el número de inspector
     const user = usuarios.find(u => u.inspector.trim().toLowerCase() === inputLimpio && u.password.trim() === passLimpia && u.activo);
     if (user) {
       setUsuarioActual(user); setEsMaestro(user.esMaestro || false); setEsJefe(user.esJefe || false);
@@ -190,7 +185,6 @@ const hacerLogin = () => {
       return alert("Completa todos los campos del registro.");
     }
 
-    // CORRECCIÓN: Validamos que haya escrito el nombre y al menos dos apellidos (mínimo 3 palabras)
     if (nombre.split(' ').filter(Boolean).length < 3) {
       return alert("Por favor, debes introducir tu nombre y tus dos apellidos para una correcta identificación.");
     }
@@ -211,7 +205,6 @@ const hacerLogin = () => {
   };
 
   const solicitarResetContrasena = async () => {
-    // CORRECCIÓN: Pide el ID de inspector en lugar del correo
     const inspectorID = prompt("Introduce tu Nº de Inspector para solicitar una nueva contraseña:");
     if (!inspectorID) return;
     const userToReset = [...usuarios, ...usuariosPendientes].find(u => u.inspector.toLowerCase() === inspectorID.trim().toLowerCase());
@@ -413,7 +406,7 @@ const hacerLogin = () => {
       alert("Error al actualizar el vehículo. ¿Foto muy grande? Error: " + error.message);
     }
   };
-const parsearDiametros = (medidaTexto) => {
+  const parsearDiametros = (medidaTexto) => {
     let limpia = medidaTexto.toUpperCase().replace(/C/g, '').trim();
     const regex = /(\d{3})(?:\/(\d{2,3}))?\s*[A-Z\-]?\s*(\d{2,3})/;
     const match = limpia.match(regex);
@@ -479,48 +472,6 @@ const parsearDiametros = (medidaTexto) => {
     setMedidasFicha(detectadas);
   };
 
-  const ejecutarOCRGratuito = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setProcesandoOCR(true);
-    
-    Tesseract.recognize(file, 'spa')
-      .then(({ data: { text } }) => {
-        const textLimpio = text.toUpperCase().replace(/\s+/g, '');
-        const regexNeumaticos = /\d{3}\/\d{2}[A-Z]*\d{2}/g;
-        const medidasEncontradas = textLimpio.match(regexNeumaticos);
-
-        if (medidasEncontradas && medidasEncontradas.length > 0) {
-          const unicas = [...new Set(medidasEncontradas)]; 
-          alert(`✅ Escaneo Exitoso. Se han detectado ${unicas.length} medidas de neumáticos: ${unicas.join(', ')}`);
-
-          const nuevosEjes = [...ejesNeumaticos];
-          if (unicas[0]) {
-            nuevosEjes[0].ruedas.izq = unicas[0];
-            nuevosEjes[0].ruedas.der = unicas[0];
-          }
-          if (unicas[1]) {
-            nuevosEjes[1].ruedas.izq = unicas[1];
-            nuevosEjes[1].ruedas.der = unicas[1];
-          } else if (unicas[0]) {
-            nuevosEjes[1].ruedas.izq = unicas[0];
-            nuevosEjes[1].ruedas.der = unicas[0];
-          }
-          setEjesNeumaticos(nuevosEjes);
-
-          actualizarMedidasManuales('todas', medidasManuales.todas + (medidasManuales.todas ? '\n' : '') + unicas.join('\n'));
-        } else {
-          actualizarMedidasManuales('todas', medidasManuales.todas + (medidasManuales.todas ? '\n' : '') + text);
-          alert("No se ha podido detectar el patrón exacto. Se ha copiado todo el texto detectado en la casilla 'Todas' para revisión manual.");
-        }
-        setProcesandoOCR(false);
-      })
-      .catch(err => {
-        alert("Error al leer la imagen. Asegúrate de que tenga buena iluminación y no haya brillos.");
-        setProcesandoOCR(false);
-      });
-  };
-
   const comprobarEquivalenciaRueda = (medidaMontada, ejeId) => {
     if (!medidaMontada) return null;
     const montadoDatos = parsearDiametros(medidaMontada);
@@ -552,6 +503,73 @@ const parsearDiametros = (medidaTexto) => {
     
     const porcentajeTxt = menorPorcentajeFallo !== Infinity ? menorPorcentajeFallo.toFixed(2) + "%" : "";
     return { apto: false, msg: `Supera ±3% (${porcentajeTxt})` };
+  };
+
+  // NUEVA FUNCIÓN: Genera y copia el informe de equivalencias
+  const copiarInformeEquivalencias = () => {
+    let informe = [];
+    
+    ejesNeumaticos.slice(0, numEjesConfig).forEach(eje => {
+      if (!eje.gemela) {
+        const mIzq = eje.ruedas.izq.trim();
+        const mDer = eje.ruedas.der.trim();
+        
+        if (mIzq && mDer && mIzq === mDer) {
+          const res = comprobarEquivalenciaRueda(mIzq, eje.id);
+          const eqText = res && res.apto ? "equivalentes" : "no equivalentes";
+          informe.push(`Monta neumáticos ${eqText} en eje ${eje.id} ${mIzq}`);
+        } else {
+          if (mIzq) {
+            const res = comprobarEquivalenciaRueda(mIzq, eje.id);
+            const eqText = res && res.apto ? "equivalentes" : "no equivalentes";
+            informe.push(`Monta neumáticos ${eqText} en eje ${eje.id} lado izquierdo ${mIzq}`);
+          }
+          if (mDer) {
+            const res = comprobarEquivalenciaRueda(mDer, eje.id);
+            const eqText = res && res.apto ? "equivalentes" : "no equivalentes";
+            informe.push(`Monta neumáticos ${eqText} en eje ${eje.id} lado derecho ${mDer}`);
+          }
+        }
+      } else {
+         const ruedasGemelas = [
+           { clave: 'izqExt', nombre: 'lado izquierdo exterior' },
+           { clave: 'izqInt', nombre: 'lado izquierdo interior' },
+           { clave: 'derExt', nombre: 'lado derecho exterior' },
+           { clave: 'derInt', nombre: 'lado derecho interior' }
+         ];
+         
+         const valoresRuedas = ruedasGemelas.map(r => eje.ruedas[r.clave].trim()).filter(Boolean);
+         const unicas = [...new Set(valoresRuedas)];
+         
+         if (unicas.length === 1 && valoresRuedas.length > 0) {
+            const medida = unicas[0];
+            const res = comprobarEquivalenciaRueda(medida, eje.id);
+            const eqText = res && res.apto ? "equivalentes" : "no equivalentes";
+            informe.push(`Monta neumáticos ${eqText} en eje ${eje.id} (ruedas gemelas) ${medida}`);
+         } else {
+            ruedasGemelas.forEach(r => {
+              const medida = eje.ruedas[r.clave].trim();
+              if (medida) {
+                const res = comprobarEquivalenciaRueda(medida, eje.id);
+                const eqText = res && res.apto ? "equivalentes" : "no equivalentes";
+                informe.push(`Monta neumáticos ${eqText} en eje ${eje.id} ${r.nombre} ${medida}`);
+              }
+            });
+         }
+      }
+    });
+
+    if (informe.length === 0) {
+      return alert("Por favor, introduce al menos una medida de neumático montado para generar el informe.");
+    }
+
+    const textoFinal = informe.join('\n');
+    navigator.clipboard.writeText(textoFinal).then(() => {
+      alert("✅ Informe copiado al portapapeles correctamente:\n\n" + textoFinal);
+    }).catch(err => {
+      console.error("Error al copiar:", err);
+      alert("Hubo un problema al copiar el texto.");
+    });
   };
 
   const LogoItevelesa = () => (
@@ -632,7 +650,7 @@ const parsearDiametros = (medidaTexto) => {
 
   const renderContenido = () => {
     if (paginaActual === 'buscar') return (
-<div className="space-y-6">
+      <div className="space-y-6">
         {!vehiculoDetalle ? (
           <>
             <div className="bg-[#101c33] p-6 rounded-3xl border border-gray-800 shadow-xl">
@@ -957,14 +975,6 @@ const parsearDiametros = (medidaTexto) => {
           
           <div className="bg-[#060c17] p-4 rounded-2xl border border-gray-700 mb-6">
             <p className="text-[10px] text-gray-400 font-bold uppercase mb-3">1. Datos Ficha Técnica (Tarjeta ITV)</p>
-            
-            <div className="flex gap-2 mb-4">
-              <input type="file" id="ocr-upload" className="hidden" accept="image/*" capture="environment" onChange={ejecutarOCRGratuito} />
-              <label htmlFor="ocr-upload" className={`flex-1 bg-[#2980b9] text-center py-3 rounded-xl text-[10px] font-black cursor-pointer uppercase text-white shadow-lg shadow-blue-900/30 flex items-center justify-center gap-2 ${procesandoOCR ? 'opacity-50 pointer-events-none' : ''}`}>
-                {procesandoOCR ? '⏳ Escaneando...' : '📷 Escanear Tarjeta Técnica'}
-              </label>
-            </div>
-            
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <span className="text-[9px] font-black uppercase text-gray-500 w-16">Todas:</span>
@@ -1056,6 +1066,11 @@ const parsearDiametros = (medidaTexto) => {
               </div>
             ))}
           </div>
+
+          <button onClick={copiarInformeEquivalencias} className="w-full bg-[#e67e22] py-5 mt-6 rounded-2xl font-black text-xs uppercase shadow-lg shadow-orange-900/40 text-white active:scale-95 transition-all">
+            📋 Copiar Informe de Neumáticos
+          </button>
+
         </div>
       </div>
     );
@@ -1074,7 +1089,6 @@ const parsearDiametros = (medidaTexto) => {
             <div className="absolute top-0 left-0 w-full h-1 bg-[#e67e22] rounded-t-full"></div>
             <h2 className="text-2xl font-black text-center mb-8 italic uppercase text-gray-300 tracking-widest">Portal<br/><span className="text-sm text-[#2980b9]">Inspectores</span></h2>
             <div className="space-y-4">
-              {/* Cambiado el placeholder a Nº DE INSPECTOR */}
               <input type="text" placeholder="Nº DE INSPECTOR" className="w-full bg-[#060c17] border border-gray-700 p-5 rounded-2xl font-bold text-sm focus:border-[#2980b9] outline-none text-white" value={loginInput} onChange={e => setLoginInput(e.target.value)} />
               <input type="password" placeholder="CONTRASEÑA" className="w-full bg-[#060c17] border border-gray-700 p-5 rounded-2xl font-bold text-sm focus:border-[#2980b9] outline-none text-white" value={passwordLogin} onChange={e => setPasswordLogin(e.target.value)} />
               <button onClick={hacerLogin} disabled={!firebaseConectado} className={`w-full py-5 rounded-2xl font-black text-lg uppercase transition-all shadow-xl text-white ${firebaseConectado ? 'bg-[#2980b9] active:scale-95 shadow-blue-900/40' : 'bg-gray-600 cursor-not-allowed'}`}>
@@ -1091,7 +1105,6 @@ const parsearDiametros = (medidaTexto) => {
                  <input type="number" placeholder="Nº ESTACIÓN" className="bg-[#060c17] border border-gray-700 p-4 rounded-2xl text-xs font-bold uppercase focus:border-[#2980b9] outline-none text-white" value={estacionRegistro} onChange={e => setEstacionRegistro(e.target.value)} />
                  <input type="text" placeholder="Nº INSPECTOR" className="bg-[#060c17] border border-gray-700 p-4 rounded-2xl text-xs font-bold uppercase focus:border-[#2980b9] outline-none text-white" value={inspectorRegistro} onChange={e => setInspectorRegistro(e.target.value)} />
                </div>
-               {/* Eliminado el campo de email */}
                <input type="password" placeholder="CONTRASEÑA" className="w-full bg-[#060c17] border border-gray-700 p-4 rounded-2xl text-xs font-bold uppercase mb-5 focus:border-[#2980b9] outline-none text-white" value={passwordRegistro} onChange={e => setPasswordRegistro(e.target.value)} />
                <button onClick={registrarUsuario} className="w-full bg-gray-800 border border-gray-700 py-4 rounded-2xl font-black text-[10px] uppercase active:scale-95 hover:bg-gray-700 text-gray-300">Solicitar Acceso</button>
           </div>
