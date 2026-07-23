@@ -595,8 +595,16 @@ const parsearDiametros = (medidaTexto) => {
   // Genera el informe de medidas montadas, copia el texto tal cual se ha escrito
   // (respetando ZR, guiones, etc.) y limpia las casillas al terminar.
   const generarInformeNeumaticos = () => {
-    const etiquetasRueda = { izq: 'Izquierda', der: 'Derecha', izqExt: 'Izq. Ext.', derExt: 'Der. Ext.', izqInt: 'Izq. Int.', derInt: 'Der. Int.' };
+    const etiquetasRueda = { izq: 'Izquierdo', der: 'Derecho', izqExt: 'Izquierdo Exterior', derExt: 'Derecho Exterior', izqInt: 'Izquierdo Interior', derInt: 'Derecho Interior' };
     const ejesActivos = ejesNeumaticos.slice(0, numEjesConfig);
+
+    // Para el portapapeles solo hace falta saber si es apta o no; el detalle con el
+    // porcentaje y la medida de ficha con la que coincide se sigue mostrando en pantalla,
+    // junto a cada rueda, sin tocar esa parte.
+    const fraseEquivalencia = (valor, ejeId) => {
+      const resultado = comprobarEquivalenciaRueda(valor, ejeId);
+      return (resultado && resultado.apto) ? 'equivalentes' : 'no equivalentes';
+    };
 
     const todasLasRuedas = [];
     ejesActivos.forEach(eje => {
@@ -616,7 +624,8 @@ const parsearDiametros = (medidaTexto) => {
 
     if (todasLasRuedas.length === 1) {
       // Solo hay una medida en toda la configuración: aplica a todas las ruedas del vehículo.
-      lineas.push(`Todas las ruedas: ${todasLasRuedas[0].valor}`);
+      const r = todasLasRuedas[0];
+      lineas.push(`- Monta neumáticos ${fraseEquivalencia(r.valor, r.ejeId)} en todo el vehículo ${r.valor}`);
     } else {
       ejesActivos.forEach(eje => {
         const claves = eje.gemela ? ['izqExt', 'derExt', 'izqInt', 'derInt'] : ['izq', 'der'];
@@ -625,10 +634,13 @@ const parsearDiametros = (medidaTexto) => {
         if (rellenas.length === 0) return;
         if (rellenas.length === 1) {
           // Solo una medida en este eje: aplica a todas las ruedas de ese eje, sin especificar lado.
-          lineas.push(`Eje ${eje.id}: ${rellenas[0].valor}`);
+          const r = rellenas[0];
+          lineas.push(`- Monta neumáticos ${fraseEquivalencia(r.valor, eje.id)} en Eje ${eje.id} ${r.valor}`);
         } else {
-          const detalle = rellenas.map(r => `${etiquetasRueda[r.clave]}: ${r.valor}`).join(' | ');
-          lineas.push(`Eje ${eje.id} - ${detalle}`);
+          // Varias medidas distintas en el eje: una línea por rueda, indicando el lado.
+          rellenas.forEach(r => {
+            lineas.push(`- Monta neumáticos ${fraseEquivalencia(r.valor, eje.id)} en Eje ${eje.id} ${etiquetasRueda[r.clave]} ${r.valor}`);
+          });
         }
       });
     }
