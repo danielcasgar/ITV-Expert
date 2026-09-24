@@ -33,7 +33,7 @@ function App() {
 
   // Vehículos (NUBE)
   const [vehiculosGuardados, setVehiculosGuardados] = useState([]);
-  const [busqueda, setBusqueda] = useState({ marca: '', modelo: '' });
+  const [busqueda, setBusqueda] = useState({ texto: '' });
   const [resultadosBusqueda, setResultadosBusqueda] = useState([]);
   const [vehiculoDetalle, setVehiculoDetalle] = useState(null);
   const [editandoVehiculo, setEditandoVehiculo] = useState(false);
@@ -166,11 +166,8 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (busqueda.marca || busqueda.modelo) {
-      setResultadosBusqueda(vehiculosGuardados.filter(v => 
-        v.marca.toLowerCase().includes(busqueda.marca.toLowerCase()) && 
-        v.modelo.toLowerCase().includes(busqueda.modelo.toLowerCase())
-      ));
+    if (busqueda.texto) {
+      setResultadosBusqueda(filtrarVehiculosPorTexto(vehiculosGuardados, busqueda.texto));
     }
   }, [vehiculosGuardados, busqueda]);
 const hacerLogin = () => {
@@ -281,8 +278,19 @@ const hacerLogin = () => {
     return false;
   };
 
+  // Filtra por una sola caja de texto: cada palabra escrita debe aparecer en marca y/o modelo
+  // (en cualquier orden), así no importa si se escribe solo la marca, solo el modelo, o ambos,
+  // ni si al dar de alta el vehículo se rellenó marca/modelo al revés por error.
+  const filtrarVehiculosPorTexto = (lista, texto) => {
+    const palabras = texto.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    return lista.filter(v => {
+      const combinado = `${v.marca} ${v.modelo}`.toLowerCase();
+      return palabras.every(palabra => combinado.includes(palabra));
+    });
+  };
+
   const buscarVehiculo = () => {
-    setResultadosBusqueda(vehiculosGuardados.filter(v => v.marca.toLowerCase().includes(busqueda.marca.toLowerCase()) && v.modelo.toLowerCase().includes(busqueda.modelo.toLowerCase())));
+    setResultadosBusqueda(filtrarVehiculosPorTexto(vehiculosGuardados, busqueda.texto));
   };
 
   const listadoFiltrado = filtroCompletados ? vehiculosGuardados.filter(v => isCompletado(v)) : resultadosBusqueda;
@@ -769,19 +777,18 @@ const parsearDiametros = (medidaTexto) => {
               {!filtroCompletados && (
                 <>
                   <div className="flex gap-2 mb-4 animate-fadeIn">
-                    <input type="text" placeholder="MARCA" className="flex-1 bg-[#060c17] border border-gray-700 p-4 rounded-2xl text-sm font-bold uppercase" value={busqueda.marca} onChange={e => setBusqueda({...busqueda, marca: e.target.value})} />
-                    <input type="text" placeholder="MODELO" className="flex-1 bg-[#060c17] border border-gray-700 p-4 rounded-2xl text-sm font-bold uppercase" value={busqueda.modelo} onChange={e => setBusqueda({...busqueda, modelo: e.target.value})} />
+                    <input type="text" placeholder="MARCA Y/O MODELO" className="flex-1 bg-[#060c17] border border-gray-700 p-4 rounded-2xl text-sm font-bold uppercase" value={busqueda.texto} onChange={e => setBusqueda({texto: e.target.value})} />
                   </div>
                   <div className="flex gap-2 animate-fadeIn">
                     <button onClick={buscarVehiculo} className="flex-[4] bg-[#2980b9] py-4 rounded-2xl font-black text-sm uppercase shadow-lg shadow-blue-900/30">Buscar</button>
-                    <button onClick={() => {setBusqueda({marca:'',modelo:''}); setResultadosBusqueda([]);}} className="flex-1 bg-gray-800 border border-gray-700 rounded-2xl font-black text-lg">✕</button>
+                    <button onClick={() => {setBusqueda({texto:''}); setResultadosBusqueda([]);}} className="flex-1 bg-gray-800 border border-gray-700 rounded-2xl font-black text-lg">✕</button>
                   </div>
                 </>
               )}
             </div>
             
             <div className="space-y-4">
-              {listadoFiltrado.length === 0 && (busqueda.marca !== '' || filtroCompletados) && (
+              {listadoFiltrado.length === 0 && (busqueda.texto !== '' || filtroCompletados) && (
                   <p className="text-center text-gray-500 text-xs font-black uppercase p-8">No hay resultados para mostrar.</p>
               )}
               {listadoFiltrado.map(v => {
